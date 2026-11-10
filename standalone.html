@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full overflow-hidden">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Batalla Naval - Fleet Command</title>
+  <meta name="description" content="Videojuego táctico de Batalla Naval en JavaScript Vanilla puro, HTML5 y CSS en una sola pantalla sin scrolling." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,400;0,600;0,700;1,400&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-deep: #030712;
+      --bg-panel: rgba(15, 23, 42, 0.85);
+      --bg-cell: rgba(15, 23, 42, 0.7);
+      --border-cyan: rgba(6, 182, 212, 0.5);
+      --border-rose: rgba(244, 63, 94, 0.5);
+      --cyan-glow: rgba(6, 182, 212, 0.25);
+      --rose-glow: rgba(239, 68, 68, 0.25);
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --color-cyan: #38bdf8;
+      --color-rose: #f43f5e;
+      --color-emerald: #10b981;
+      --color-amber: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden; /* CERO SCROLLBARS */
+      background-color: var(--bg-deep);
+      color: var(--text-main);
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      user-select: none;
+    }
+
+    /* Escenario de resolución fija, escalado y centrado en cualquier pantalla */
+    #game-viewport {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      background-color: var(--bg-deep);
+    }
+
+    #game-stage {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 1280px;
+      height: 720px;
+      overflow: hidden;
+      transform: translate(-50%, -50%) scale(1);
+      transform-origin: center center;
+    }
+
+    .font-display { font-family: 'Chakra Petch', sans-serif; }
+    .font-mono-combat { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+
+    @keyframes screenEnter {
+      0% {
+        opacity: 0;
+        transform: translateY(10px) scale(0.99);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .screen-active {
+      animation: screenEnter 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    @keyframes radarSweep {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .radar-sweep-arm {
+      transform-origin: 50% 50%;
+      animation: radarSweep 2.2s linear infinite;
+    }
+
+    .scanlines {
+      background: linear-gradient(
+        rgba(18, 16, 16, 0) 50%, 
+        rgba(0, 0, 0, 0.22) 50%
+      ), linear-gradient(
+        90deg,
+        rgba(255, 0, 0, 0.02),
+        rgba(0, 255, 0, 0.01),
+        rgba(0, 255, 0, 0.02)
+      );
+      background-size: 100% 4px, 6px 100%;
+    }
+
+    .naval-glow-cyan {
+      box-shadow: 0 0 15px -2px var(--cyan-glow), inset 0 0 10px -2px rgba(6, 182, 212, 0.1);
+    }
+
+    .naval-glow-red {
+      box-shadow: 0 0 15px -2px var(--rose-glow), inset 0 0 10px -2px rgba(239, 68, 68, 0.15);
+    }
+
+    .grid-10x10-row {
+      display: grid;
+      grid-template-columns: 22px repeat(10, minmax(22px, 32px));
+      gap: 2.5px;
+    }
+
+    .naval-cell-base {
+      position: relative;
+      aspect-ratio: 1 / 1;
+      border-radius: 4px;
+      border: 1px solid rgba(51, 65, 85, 0.7);
+      background-color: var(--bg-cell);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      transition: all 0.12s ease;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    .cell-hit {
+      background-color: rgba(76, 5, 25, 0.9) !important;
+      border-color: #f43f5e !important;
+      color: #fda4af;
+      box-shadow: inset 0 0 8px rgba(225, 29, 72, 0.7);
+    }
+
+    .cell-miss {
+      background-color: rgba(12, 74, 110, 0.5) !important;
+      border-color: rgba(56, 189, 248, 0.6) !important;
+      color: #38bdf8;
+    }
+
+    .cell-ship {
+      background-color: rgba(8, 47, 73, 0.95) !important;
+      border-color: rgba(14, 165, 233, 0.85) !important;
+      color: #bae6fd;
+    }
+
+    .cell-ship-sunk {
+      background-color: rgba(39, 39, 42, 0.9) !important;
+      border-color: #71717a !important;
+      color: #a1a1aa;
+    }
+
+    /* Previsualización de colocación de barcos */
+    .setup-cell.cell-preview-valid {
+      background-color: rgba(37, 99, 235, 0.7) !important;
+      border-color: #3b82f6 !important;
+      box-shadow: inset 0 0 10px rgba(59, 130, 246, 0.75);
+    }
+
+    .setup-cell.cell-preview-invalid {
+      background-color: rgba(185, 28, 28, 0.75) !important;
+      border-color: #ef4444 !important;
+      box-shadow: inset 0 0 10px rgba(239, 68, 68, 0.75);
+    }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.4); }
+    ::-webkit-scrollbar-thumb { background: rgba(51, 65, 85, 0.7); border-radius: 3px; }
+  </style>
+</head>
+  <body class="h-full w-full bg-slate-950 text-slate-100 font-sans select-none overflow-hidden">
+    <div id="game-viewport">
+    <div id="game-stage">
+    <div id="app" class="relative w-full h-full overflow-hidden">
+
+    <!-- ==========================================
+         1. PANTALLA DE INICIO (TITLE SCREEN)
+         ========================================== -->
+    <section id="screen-title" class="screen-active relative w-full h-full flex flex-col justify-between overflow-hidden bg-slate-950 text-slate-100 scanlines p-6">
+      <header class="relative z-10 flex items-center justify-between max-w-4xl mx-auto w-full">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-cyan-950 border border-cyan-500/50 flex items-center justify-center text-cyan-400 naval-glow-cyan text-sm font-bold">⚓</div>
+          <div>
+            <span class="font-display font-bold text-sm tracking-widest text-cyan-400 uppercase">FLEET COMMAND</span>
+            <div class="text-[10px] font-mono-combat text-slate-400">JAVASCRIPT VANILLA · HTML5 · CSS</div>
+          </div>
+        </div>
+        <button id="btn-toggle-sound-title" type="button" class="p-2 rounded-lg bg-slate-900/80 border border-slate-700 text-slate-300 hover:text-cyan-400 transition-colors flex items-center gap-2 cursor-pointer font-mono-combat text-xs">
+          <span id="title-sound-icon">🔊</span>
+          <span id="title-sound-text" class="inline">SONIDO: ON</span>
+        </button>
+      </header>
+
+      <main class="relative z-10 flex flex-col items-center justify-center px-4 text-center max-w-xl mx-auto w-full my-auto">
+        <div class="mb-4">
+          <svg class="w-full max-w-[460px] h-auto drop-shadow-[0_8px_16px_rgba(6,182,212,0.3)]" viewBox="0 0 600 115" fill="none">
+            <circle cx="300" cy="55" r="45" stroke="#0ea5e9" stroke-width="1" stroke-dasharray="3 3" opacity="0.3" />
+            <line x1="240" y1="55" x2="360" y2="55" stroke="#0ea5e9" stroke-width="1" opacity="0.4" />
+            <line x1="300" y1="10" x2="300" y2="100" stroke="#0ea5e9" stroke-width="1" opacity="0.4" />
+            <text x="50%" y="52" text-anchor="middle" class="font-display font-black tracking-[0.25em]" fill="#ffffff" font-size="42" font-weight="900">BATALLA NAVAL</text>
+            <text x="50%" y="85" text-anchor="middle" class="font-display tracking-[0.45em]" fill="#38bdf8" font-size="14" font-weight="600">FLEET COMMAND TACTICAL</text>
+          </svg>
+        </div>
+
+        <p class="max-w-md text-slate-300 text-sm leading-relaxed mb-6 font-normal">
+          Bienvenido, Comandante. Calcula las coordenadas enemigas, despliega tus 5 buques de guerra y domina el océano en combate táctico naval.
+        </p>
+
+        <!-- Los dos botones solicitados en pantalla de inicio -->
+        <div class="flex flex-row items-center justify-center gap-3 w-full max-w-sm mb-4">
+          <button id="btn-main-start" type="button" class="w-full flex-1 inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-display font-bold text-sm tracking-wider uppercase hover:from-cyan-400 hover:to-blue-500 transition-all shadow-lg shadow-cyan-500/25 active:scale-95 cursor-pointer">
+            <span>▶</span>
+            <span>Iniciar Juego</span>
+          </button>
+          <button id="btn-main-exit" type="button" class="w-auto inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl bg-slate-900 border border-slate-700 hover:border-rose-500 hover:bg-rose-950/30 text-slate-300 hover:text-rose-300 font-display font-bold text-sm tracking-wider uppercase transition-all active:scale-95 cursor-pointer">
+            <span>✕</span>
+            <span>Salir</span>
+          </button>
+        </div>
+
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/60 border border-slate-800 text-[11px] font-mono-combat text-slate-400">
+          <span>🛡️ 5 Navíos Simétricos</span>
+          <span>·</span>
+          <span>17 Impactos</span>
+          <span>·</span>
+          <span>100VH Sin Scroll</span>
+        </div>
+      </main>
+
+      <footer class="relative z-10 py-1.5 text-center font-mono-combat text-[11px] text-slate-400 border-t border-slate-800/60">
+        Enter Iniciar · Pantalla única sin scrolling · JavaScript Vanilla Puro
+      </footer>
+    </section>
+
+    <!-- ==========================================
+         2. PANTALLA DE SELECCIÓN DE MODO
+         ========================================== -->
+    <section id="screen-mode-select" class="hidden relative w-full h-full flex flex-col justify-between overflow-hidden bg-slate-950 text-slate-100 scanlines p-6">
+      <header class="relative z-10 flex items-center justify-between max-w-4xl mx-auto w-full pb-2 border-b border-slate-800">
+        <button id="btn-mode-back" type="button" class="px-3 py-1 rounded-lg border border-slate-800 bg-slate-900 text-xs font-mono-combat text-slate-400 hover:text-white cursor-pointer">
+          ← Volver a Inicio
+        </button>
+        <div class="text-center">
+          <div class="font-display font-bold text-sm tracking-wider text-cyan-400 uppercase">
+            SELECCIÓN DE MODO DE JUEGO
+          </div>
+          <div class="text-[10px] font-mono-combat text-slate-400">
+            PASO 1 DE 3: ELIGE TU TIPO DE OPONENTE
+          </div>
+        </div>
+        <div class="w-16"></div>
+      </header>
+
+      <main class="relative z-10 flex-1 flex flex-col items-center justify-center max-w-xl mx-auto w-full my-auto px-4 gap-4">
+        <div class="text-center mb-1">
+          <h2 class="font-display font-bold text-xl text-slate-100 uppercase tracking-wider mb-1">
+            ¿Cómo deseas combatir?
+          </h2>
+          <p class="text-xs text-slate-400 font-mono-combat">
+            Selecciona si deseas luchar contra la computadora o buscar un rival en línea
+          </p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 w-full">
+          <!-- BOTÓN MODO 1: VS IA -->
+          <button id="btn-choose-ai-mode" type="button" class="p-5 rounded-2xl border text-left bg-slate-900/90 border-cyan-500/60 hover:border-cyan-400 hover:bg-slate-850 hover:scale-[1.02] transition-all cursor-pointer group shadow-lg shadow-cyan-950/30">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-3xl">🤖</span>
+              <span class="text-[10px] font-mono-combat px-2 py-0.5 rounded bg-cyan-950 border border-cyan-500/50 text-cyan-300">INDIVIDUAL</span>
+            </div>
+            <h3 class="font-display font-bold text-base text-slate-100 uppercase tracking-wider mb-1 group-hover:text-cyan-300">
+              Combate vs la IA
+            </h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Juega contra la Inteligencia Artificial con dificultad seleccionable.
+            </p>
+            <div class="mt-4 flex items-center gap-1.5 text-xs text-cyan-400 font-mono-combat font-semibold">
+              <span>Elegir Dificultad</span>
+              <span>→</span>
+            </div>
+          </button>
+
+          <!-- BOTÓN MODO 2: MULTIJUGADOR -->
+          <button id="btn-choose-multiplayer-mode" type="button" class="p-5 rounded-2xl border text-left bg-slate-900/90 border-blue-500/60 hover:border-blue-400 hover:bg-slate-850 hover:scale-[1.02] transition-all cursor-pointer group shadow-lg shadow-blue-950/30">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-3xl">🌐</span>
+              <span class="text-[10px] font-mono-combat px-2 py-0.5 rounded bg-blue-950 border border-blue-500/50 text-blue-300">EN LÍNEA</span>
+            </div>
+            <h3 class="font-display font-bold text-base text-slate-100 uppercase tracking-wider mb-1 group-hover:text-blue-300">
+              Multijugador
+            </h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Busca contrincantes que estén jugando en tiempo real o usa código de sala.
+            </p>
+            <div class="mt-4 flex items-center gap-1.5 text-xs text-blue-400 font-mono-combat font-semibold">
+              <span>Buscar Rival</span>
+              <span>→</span>
+            </div>
+          </button>
+        </div>
+      </main>
+
+      <footer class="relative z-10 py-1 text-center font-mono-combat text-[10px] text-slate-400 border-t border-slate-800/60">
+        Selecciona una opción para avanzar a la siguiente pantalla
+      </footer>
+    </section>
+
+    <!-- ==========================================
+         3A. PANTALLA DE SELECCIÓN DE DIFICULTAD DE LA IA
+         ========================================== -->
+    <section id="screen-difficulty-select" class="hidden relative w-full h-full flex flex-col justify-between overflow-hidden bg-slate-950 text-slate-100 scanlines p-6">
+      <header class="relative z-10 flex items-center justify-between max-w-4xl mx-auto w-full pb-2 border-b border-slate-800">
+        <button id="btn-diff-back" type="button" class="px-3 py-1 rounded-lg border border-slate-800 bg-slate-900 text-xs font-mono-combat text-slate-400 hover:text-white cursor-pointer">
+          ← Volver a Modos
+        </button>
+        <div class="text-center">
+          <div class="font-display font-bold text-sm tracking-wider text-cyan-400 uppercase">
+            DIFICULTAD DE LA INTELIGENCIA ARTIFICIAL
+          </div>
+          <div class="text-[10px] font-mono-combat text-slate-400">
+            PASO 2 DE 3: SELECCIONA EL NIVEL TÁCTICO DEL ENEMIGO
+          </div>
+        </div>
+        <div class="w-16"></div>
+      </header>
+
+      <main class="relative z-10 flex-1 flex flex-col items-center justify-center max-w-xl mx-auto w-full my-auto px-4 gap-4">
+        <div class="text-center mb-1">
+          <h2 class="font-display font-bold text-xl text-slate-100 uppercase tracking-wider mb-1">
+            Calibra los Sistemas de la IA
+          </h2>
+          <p class="text-xs text-slate-400 font-mono-combat">
+            La IA enemiga colocará sus 5 barcos al azar. Selecciona su agresividad de disparo:
+          </p>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3 w-full">
+          <button data-diff="novice" type="button" class="btn-diff-card p-4 rounded-xl border text-center transition-all bg-slate-900/90 border-slate-800 text-slate-300 hover:border-slate-700 cursor-pointer">
+            <div class="text-2xl mb-1">⚓</div>
+            <div class="font-display font-bold text-sm text-slate-100 uppercase">Novato</div>
+            <div class="text-[11px] text-cyan-400 font-mono-combat my-1">Disparos al azar</div>
+            <p class="text-[10px] text-slate-400 leading-tight">
+              Dispara aleatoriamente sin rastrear tus barcos tocados.
+            </p>
+          </button>
+
+          <button data-diff="veteran" type="button" class="btn-diff-card p-4 rounded-xl border text-center transition-all bg-cyan-500/20 border-cyan-400 text-white ring-2 ring-cyan-400 cursor-pointer shadow-lg shadow-cyan-950/40">
+            <div class="text-2xl mb-1">⚔️</div>
+            <div class="font-display font-bold text-sm text-cyan-200 uppercase">Veterano</div>
+            <div class="text-[11px] text-cyan-300 font-mono-combat my-1">Persecución básica</div>
+            <p class="text-[10px] text-slate-300 leading-tight">
+              Al impactar un navío busca en las casillas adyacentes hasta hundirlo.
+            </p>
+          </button>
+
+          <button data-diff="admiral" type="button" class="btn-diff-card p-4 rounded-xl border text-center transition-all bg-slate-900/90 border-slate-800 text-slate-300 hover:border-slate-700 cursor-pointer">
+            <div class="text-2xl mb-1">👑</div>
+            <div class="font-display font-bold text-sm text-slate-100 uppercase">Almirante</div>
+            <div class="text-[11px] text-rose-400 font-mono-combat my-1">Alta agresividad</div>
+            <p class="text-[10px] text-slate-400 leading-tight">
+              Rastreo en línea recta y máxima cobertura balística.
+            </p>
+          </button>
+        </div>
+
+        <button id="btn-proceed-to-setup" type="button" class="w-full max-w-sm py-3 px-6 rounded-xl font-display font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 cursor-pointer transition-all shadow-md shadow-cyan-500/20">
+          Continuar al Despliegue de Barcos →
+        </button>
+      </main>
+
+      <footer class="relative z-10 py-1 text-center font-mono-combat text-[10px] text-slate-400 border-t border-slate-800/60">
+        Selecciona dificultad y avanza a colocar tus navíos
+      </footer>
+    </section>
+
+    <!-- ==========================================
+         3B. PANTALLA DE BÚSQUEDA MULTIJUGADOR
+         ========================================== -->
+    <section id="screen-multiplayer-search" class="hidden relative w-full h-full flex flex-col justify-between overflow-hidden bg-slate-950 text-slate-100 scanlines p-5">
+      <header class="relative z-10 flex items-center justify-between max-w-5xl mx-auto w-full pb-2 border-b border-slate-800">
+        <button id="btn-multiplayer-back" type="button" class="px-3 py-1 rounded-lg border border-slate-800 bg-slate-900 text-xs font-mono-combat text-slate-400 hover:text-white cursor-pointer">
+          ← Volver a Modos
+        </button>
+        <div class="text-center">
+          <div class="font-display font-bold text-sm tracking-wider text-cyan-400 uppercase">
+            BÚSQUEDA DE CONTRINCANTES EN LÍNEA
+          </div>
+          <div class="text-[10px] font-mono-combat text-slate-400">
+            PASO 2 DE 3: ENCONTRAR UN OPONENTE ACTIVO
+          </div>
+        </div>
+        <div class="w-16"></div>
+      </header>
+
+      <main class="relative z-10 flex-1 flex flex-row items-center justify-center gap-5 max-w-4xl mx-auto w-full my-auto overflow-hidden px-4">
+        <!-- RADAR ANIMADO DE BÚSQUEDA -->
+        <div class="w-1/2 flex flex-col items-center justify-center p-4 bg-slate-900/80 border border-slate-800 rounded-2xl text-center">
+          <div class="relative w-44 h-44 rounded-full border-2 border-cyan-500/40 bg-slate-950 flex items-center justify-center mb-3 overflow-hidden shadow-inner shadow-cyan-950">
+            <div class="absolute inset-4 rounded-full border border-cyan-500/30"></div>
+            <div class="absolute inset-10 rounded-full border border-cyan-500/20"></div>
+            <div class="absolute inset-16 rounded-full border border-cyan-500/15"></div>
+            <div class="absolute w-full h-[1px] bg-cyan-500/20"></div>
+            <div class="absolute h-full w-[1px] bg-cyan-500/20"></div>
+            <div class="absolute inset-0 radar-sweep-arm bg-[conic-gradient(from_0deg,transparent_0deg,transparent_270deg,rgba(6,182,212,0.35)_360deg)]"></div>
+            <div class="relative z-10 w-3 h-3 rounded-full bg-cyan-400 animate-ping"></div>
+          </div>
+
+          <div id="radar-search-status" class="text-xs font-mono-combat text-cyan-300 font-semibold mb-1 animate-pulse">
+            📡 Rastreador naval buscando contrincantes...
+          </div>
+          <div class="text-[11px] text-slate-400 font-mono-combat mb-3">
+            Sector: Mar Territorial Global
+          </div>
+
+          <button id="btn-auto-match" type="button" class="w-full py-2.5 px-4 rounded-xl font-display font-bold text-xs uppercase tracking-wider bg-cyan-500 hover:bg-cyan-400 text-slate-950 transition-all cursor-pointer shadow-lg shadow-cyan-500/25">
+            Emparejamiento Rápido
+          </button>
+        </div>
+
+        <!-- SALAS Y CÓDIGO DE PARTIDA -->
+        <div class="w-1/2 flex flex-col gap-3 justify-center">
+          <div class="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
+            <div class="text-xs font-display font-bold uppercase text-slate-200 mb-1.5">
+              Ingresar Código de Sala
+            </div>
+            <div class="flex gap-2">
+              <input id="input-search-room-code" type="text" placeholder="Ej: #NAVAL-7241" maxlength="12" class="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono-combat text-cyan-300 placeholder-slate-600 focus:outline-none focus:border-cyan-400 uppercase">
+              <button id="btn-join-search-code" type="button" class="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-display font-bold text-xs uppercase cursor-pointer">
+                Unirse
+              </button>
+            </div>
+          </div>
+
+          <div class="p-3 bg-slate-900/90 border border-slate-800 rounded-xl flex-1 flex flex-col justify-between">
+            <div class="flex items-center justify-between pb-1.5 mb-2 border-b border-slate-800">
+              <span class="text-xs font-display font-bold uppercase text-slate-200">
+                Comandantes Listos
+              </span>
+              <span class="text-[10px] font-mono-combat text-emerald-400">EN ESPERA</span>
+            </div>
+            <div id="multiplayer-active-list" class="space-y-1.5 max-h-[140px] overflow-y-auto"></div>
+          </div>
+        </div>
+      </main>
+
+      <footer class="relative z-10 py-1 text-center font-mono-combat text-[10px] text-slate-400 border-t border-slate-800/60">
+        Encuentra un contrincante para avanzar a la colocación de navíos
+      </footer>
+    </section>
+
+    <!-- ==========================================
+         4. PANTALLA DE DESPLIEGUE (100VH FIJO)
+         ========================================== -->
+    <section id="setup-screen" class="hidden relative w-full h-full flex flex-col justify-between bg-slate-950 text-slate-100 p-4 scanlines overflow-hidden">
+      <header class="relative z-10 flex items-center justify-between max-w-5xl mx-auto w-full pb-2 border-b border-slate-800">
+        <button id="btn-setup-back" type="button" class="px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900 text-xs font-mono-combat text-slate-400 hover:text-white cursor-pointer">
+          ← Cambiar Oponente
+        </button>
+        <div class="text-center">
+          <div id="setup-main-title" class="font-display font-bold text-sm tracking-wider text-cyan-400 uppercase">
+            DESPLIEGUE DE TUS NAVÍOS DE COMBATE
+          </div>
+          <div id="setup-sub-title" class="text-[10px] font-mono-combat text-slate-400">
+            SELECCIONA UN BARCO Y HAZ CLIC EN LA CUADRÍCULA PARA COLOCARLO
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5 text-xs font-mono-combat">
+          <span class="text-slate-400">ESTADO:</span>
+          <span id="setup-ships-count" class="text-amber-400 font-semibold">0/5 NAVÍOS</span>
+        </div>
+      </header>
+
+      <main class="relative z-10 flex-1 flex flex-row items-center justify-center gap-4 max-w-5xl mx-auto w-full my-auto overflow-hidden">
+        <div class="shrink-0 flex flex-col items-center">
+          <div class="w-full flex items-center justify-between mb-1 px-1 text-xs">
+            <span class="font-display font-semibold tracking-wider uppercase text-cyan-300 text-[11px]">
+              🛡️ Tus Aguas Territoriales (10×10)
+            </span>
+            <span id="setup-coord-indicator" class="font-mono-combat text-slate-400 text-[11px]">
+              SECTOR A-J / 1-10
+            </span>
+          </div>
+          <div class="p-2 bg-slate-950/80 rounded-xl border border-cyan-950 naval-glow-cyan">
+            <div id="setup-grid" class="flex flex-col gap-[2.5px]"></div>
+          </div>
+        </div>
+
+        <div class="w-full max-w-sm flex flex-col gap-2.5">
+          <div class="p-2.5 bg-slate-900 border border-slate-800 rounded-xl">
+            <div class="flex items-center justify-between mb-2 pb-1 border-b border-slate-800 text-[11px] font-mono-combat text-slate-400 uppercase">
+              <span>Orientación</span>
+              <span class="text-cyan-400 font-bold">Tecla [R]</span>
+            </div>
+            <div class="grid grid-cols-2 gap-1.5 mb-2">
+              <button id="btn-orient-horizontal" type="button" class="py-1.5 px-2 rounded-lg border text-xs font-semibold bg-cyan-500/20 border-cyan-400 text-cyan-200 ring-1 ring-cyan-400 cursor-pointer">
+                Horizontal
+              </button>
+              <button id="btn-orient-vertical" type="button" class="py-1.5 px-2 rounded-lg border text-xs font-semibold bg-slate-950 border-slate-800 text-slate-400 hover:text-white cursor-pointer">
+                Vertical
+              </button>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <button id="btn-randomize-fleet" type="button" class="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 cursor-pointer">
+                <span>🔀</span><span>Colocar al Azar</span>
+              </button>
+              <button id="btn-clear-fleet" type="button" class="flex items-center justify-center gap-1 py-1.5 px-2.5 rounded-lg border border-rose-900 bg-rose-950/30 hover:bg-rose-900/40 text-xs text-rose-300 cursor-pointer">
+                <span>🗑️</span><span>Limpiar</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="p-2.5 bg-slate-900 border border-slate-800 rounded-xl">
+            <div class="text-[11px] font-mono-combat text-slate-400 mb-1.5 uppercase tracking-wider">
+              Inventario de Flota (5 buques)
+            </div>
+            <div id="ship-inventory" class="space-y-1"></div>
+          </div>
+
+          <button id="btn-launch-battle" type="button" disabled class="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-display font-bold text-xs tracking-wider uppercase bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed opacity-50 transition-all">
+            <span>Coloca los 5 navíos para jugar</span>
+          </button>
+        </div>
+      </main>
+
+      <footer class="relative z-10 py-1 text-center font-mono-combat text-[10px] text-slate-400 border-t border-slate-800/60">
+        Tecla [R] Rotar · Clic en la cuadrícula para colocar · Clic en barco puesto para moverlo
+      </footer>
+    </section>
+
+    <!-- ==========================================
+         5. PANTALLA DE COMBATE NAVAL (100VH FIJO)
+         LADO A LADO - CERO SCROLLING
+         ========================================== -->
+    <section id="battle-screen" class="hidden relative w-full h-full flex flex-col justify-between p-3.5 scanlines overflow-hidden">
+      <header class="relative z-20 flex items-center justify-between pb-1.5 border-b border-slate-800 max-w-6xl mx-auto w-full shrink-0">
+        <div class="flex items-center gap-2">
+          <div class="w-6 h-6 rounded-md bg-cyan-950 border border-cyan-500/60 flex items-center justify-center text-cyan-400 text-xs font-bold">⚓</div>
+          <div>
+            <div class="font-display font-bold text-xs tracking-wider text-slate-100 uppercase">BATALLA NAVAL</div>
+            <div id="battle-mode-indicator" class="text-[10px] font-mono-combat text-slate-400">COMBATE VS IA</div>
+          </div>
+        </div>
+
+        <div class="text-center">
+          <div id="turn-banner" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono-combat border bg-cyan-500/20 border-cyan-400 text-cyan-200">
+            <span id="turn-pulse-dot" class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+            <span id="turn-banner-text" class="font-bold">🎯 TU TURNO DE DISPARAR (CLIC EN EL RADAR)</span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-1.5">
+          <button id="btn-toggle-sound-battle" type="button" class="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-cyan-400 cursor-pointer">
+            <span id="battle-sound-icon">🔊</span>
+          </button>
+          <button id="btn-surrender" type="button" class="py-1 px-2.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono-combat text-slate-300 hover:text-rose-400 cursor-pointer">
+            <span>Menú</span>
+          </button>
+        </div>
+      </header>
+
+      <div id="ai-status-banner" class="hidden relative z-20 max-w-md mx-auto w-full py-0.5 px-3 rounded-lg bg-rose-950/70 border border-rose-500/40 text-center font-mono-combat text-xs text-rose-300 flex items-center justify-center gap-2 shrink-0 animate-pulse my-0.5">
+        <span>🎯</span><span id="opponent-status-text">La computadora está calculando vector de tiro...</span>
+      </div>
+
+      <main class="relative z-10 flex-1 flex flex-row items-center justify-center gap-8 max-w-6xl mx-auto w-full my-auto overflow-hidden">
+        <!-- TABLERO IZQUIERDO: TU FLOTA (DEFENSA) -->
+        <div class="flex flex-col items-center shrink-0">
+          <div class="w-full flex items-center justify-between mb-1 px-1">
+            <span id="friendly-board-header" class="font-display font-semibold text-xs uppercase text-cyan-300">
+              🛡️ Tu Flota (Aguas Aliadas)
+            </span>
+            <span id="friendly-hits-counter" class="font-mono-combat text-[11px] text-slate-400">
+              0/17 DAÑOS
+            </span>
+          </div>
+          <div class="p-2 bg-slate-950/80 rounded-xl border border-cyan-950 naval-glow-cyan">
+            <div id="friendly-grid" class="flex flex-col gap-[2.5px]"></div>
+          </div>
+          <div id="friendly-fleet-status" class="w-full mt-1.5"></div>
+        </div>
+
+        <!-- TABLERO DERECHO: RADAR ENEMIGO (ATAQUE) -->
+        <div class="flex flex-col items-center shrink-0">
+          <div class="w-full flex items-center justify-between mb-1 px-1">
+            <span id="enemy-board-header" class="font-display font-semibold text-xs uppercase text-rose-400">
+              🎯 Radar Enemigo (Aguas Hostiles)
+            </span>
+            <span id="enemy-grid-coord" class="font-mono-combat text-[11px] text-slate-400">
+              SELECCIONA CASILLA
+            </span>
+          </div>
+          <div class="p-2 bg-slate-950/80 rounded-xl border border-rose-950 naval-glow-red">
+            <div id="enemy-grid" class="flex flex-col gap-[2.5px]"></div>
+          </div>
+          <div id="enemy-fleet-status" class="w-full mt-1.5"></div>
+        </div>
+      </main>
+
+      <footer class="relative z-10 flex items-center justify-between px-3 py-1.5 rounded-lg bg-slate-900/80 border border-slate-800 max-w-6xl mx-auto w-full font-mono-combat text-xs text-slate-300 shrink-0">
+        <div class="flex items-center gap-2 truncate">
+          <span class="text-cyan-400 font-bold shrink-0">📟 COMUNICACIONES:</span>
+          <span id="last-combat-log" class="text-slate-200 truncate">Sistemas armados. Haz clic en el Radar Enemigo para abrir fuego.</span>
+        </div>
+        <div id="combat-turn-counter" class="text-cyan-300 font-semibold shrink-0 ml-3">
+          TURNO 1
+        </div>
+      </footer>
+    </section>
+
+    <!-- MODAL CONFIRMACIÓN DE SALIDA -->
+    <div id="exit-confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 scanlines">
+      <div class="w-full max-w-md p-6 rounded-2xl border text-center bg-slate-950 border-rose-500/80 naval-glow-red">
+        <div class="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 border text-2xl bg-rose-950 border-rose-500 text-rose-300">
+          🚪
+        </div>
+        <h3 class="font-display font-bold text-xl uppercase tracking-wider text-slate-100 mb-1">
+          ¿ABANDONAR EL JUEGO?
+        </h3>
+        <p class="text-xs text-slate-400 font-mono-combat mb-5">
+          Se cerrará la sesión de mando actual. ¿Deseas salir del videojuego?
+        </p>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btn-cancel-exit" type="button" class="py-2.5 px-3 rounded-xl font-display font-bold text-xs uppercase border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer">
+            Cancelar
+          </button>
+          <button id="btn-confirm-exit" type="button" class="py-2.5 px-3 rounded-xl font-display font-bold text-xs uppercase bg-rose-600 hover:bg-rose-500 text-white cursor-pointer shadow-lg shadow-rose-900/40">
+            Confirmar Salida
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PANTALLA DE SESIÓN CERRADA -->
+    <section id="screen-decommissioned" class="hidden relative w-full h-full flex flex-col items-center justify-center bg-slate-950 text-slate-100 p-4 scanlines">
+      <div class="max-w-md w-full p-6 text-center border border-slate-800 bg-slate-900/90 rounded-2xl">
+        <div class="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-3 border text-3xl bg-slate-950 border-slate-700 text-slate-400">
+          ⚓
+        </div>
+        <h2 class="font-display font-bold text-xl text-slate-200 uppercase mb-2">SESIÓN NAVAL CERRADA</h2>
+        <p class="text-xs text-slate-400 font-mono-combat mb-5">
+          Has salido de Fleet Command. Puedes cerrar esta pestaña de tu navegador de forma segura.
+        </p>
+        <button id="btn-reconnect" type="button" class="py-2.5 px-5 rounded-xl font-display font-bold text-xs uppercase bg-cyan-500 hover:bg-cyan-400 text-slate-950 cursor-pointer">
+          🔄 Volver al Menú Principal
+        </button>
+      </div>
+    </section>
+
+    <!-- MODAL FIN DE PARTIDA -->
+    <div id="game-over-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 scanlines">
+      <div id="game-over-box" class="w-full max-w-md p-6 rounded-2xl border text-center bg-slate-950 border-cyan-500 naval-glow-cyan">
+        <div class="flex flex-col items-center mb-4">
+          <div id="game-over-icon" class="w-14 h-14 rounded-2xl flex items-center justify-center mb-3 border text-2xl bg-cyan-950 border-cyan-400 text-cyan-300">🏆</div>
+          <h2 id="game-over-title" class="font-display font-black text-2xl uppercase tracking-widest text-cyan-300 mb-1">¡VICTORIA NAVAL!</h2>
+          <div id="game-over-subtitle" class="font-mono-combat text-xs text-slate-400 uppercase">Destruiste los 5 buques de la flota enemiga</div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5 mb-4 text-xs font-mono-combat">
+          <div class="grid grid-cols-3 gap-2 text-center">
+            <div class="p-2 rounded bg-slate-950 border border-slate-800">
+              <div class="text-[10px] text-slate-400">PRECISIÓN</div>
+              <div id="stat-accuracy" class="text-sm font-bold text-cyan-400">0%</div>
+            </div>
+            <div class="p-2 rounded bg-slate-950 border border-slate-800">
+              <div class="text-[10px] text-slate-400">DISPAROS</div>
+              <div id="stat-shots" class="text-sm font-bold text-slate-200">0</div>
+            </div>
+            <div class="p-2 rounded bg-slate-950 border border-slate-800">
+              <div class="text-[10px] text-slate-400">TURNOS</div>
+              <div id="stat-turns" class="text-sm font-bold text-slate-200">0</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btn-play-again" type="button" class="py-2.5 px-3 rounded-xl font-display font-bold text-xs uppercase bg-cyan-500 hover:bg-cyan-400 text-slate-950 cursor-pointer">🔄 Jugar de Nuevo</button>
+          <button id="btn-return-menu" type="button" class="py-2.5 px-3 rounded-xl font-display font-bold text-xs uppercase border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer">🏠 Menú Principal</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  </div>
+  </div>
+
+  <canvas id="combat-canvas" class="fixed inset-0 pointer-events-none z-40 w-full h-full"></canvas>
+  <script src="script.js"></script>
+</body>
+</html>

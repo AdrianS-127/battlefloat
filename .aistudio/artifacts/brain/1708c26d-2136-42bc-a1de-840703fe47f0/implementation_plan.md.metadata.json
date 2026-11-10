@@ -1,0 +1,6 @@
+{
+  "summary":  "Plan de implementación para la reestructuración del juego en pantallas secuenciales: Pantalla de Inicio con Iniciar y Salir, Pantalla de Selección de Modo (IA con selección de dificultad vs Multijugador con salas, código y lista de espera), Pantalla de Despliegue de Flota y Combate Naval 100vh lado a lado.",
+  "updatedAt":  "2026-11-08T19:15:34.254471804Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

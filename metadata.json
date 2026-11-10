@@ -1,0 +1,6 @@
+{
+  "name": "Batalla Naval - Fleet Command",
+  "description": "Videojuego táctico de Batalla Naval con radar interactivo, inteligencia artificial avanzada, efectos de sonido procedurales y modos de combate clásico y táctico.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
